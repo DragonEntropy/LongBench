@@ -5,7 +5,7 @@ from tqdm import tqdm
 from datasets import load_dataset
 import re
 from openai import OpenAI
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, LlamaTokenizer
 import tiktoken
 import torch.multiprocessing as mp
 
@@ -72,7 +72,9 @@ def get_pred(data, args, fout):
     if "gpt" in model or "o1" in model:
         tokenizer = tiktoken.encoding_for_model("gpt-4o-2024-08-06")
     else:
-        tokenizer = AutoTokenizer.from_pretrained(model_map[model], trust_remote_code=True)
+        # tokenizer = AutoTokenizer.from_pretrained(model_map[model], trust_remote_code=True)
+        print(model_map[model])
+        tokenizer = LlamaTokenizer.from_pretrained(model_map[model], local_files_only=True)
     client = OpenAI(
         base_url=URL,
         api_key=API_KEY
