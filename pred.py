@@ -39,13 +39,24 @@ def query_llm(prompt, model, tokenizer, client=None, temperature=0.5, max_new_to
     while tries < 5:
         tries += 1
         try:
-            completion = client.chat.completions.create(
+            """completion = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
                 max_tokens=max_new_tokens,
+                stream=False
             )
-            return completion.choices[0].message.content
+            """
+            completion = client.completions.create(
+                model=model,
+                prompt=prompt,
+                temperature=temperature,
+                max_tokens=max_new_tokens,
+                stream=False
+            )
+            print(completion.choices[0].text)
+            return completion.choices[0].text
+            # return completion.choices[0].message.content
         except KeyboardInterrupt as e:
             raise e
         except Exception as e:
@@ -56,6 +67,7 @@ def query_llm(prompt, model, tokenizer, client=None, temperature=0.5, max_new_to
         return ''
 
 def extract_answer(response):
+    print(response)
     response = response.replace('*', '')
     match = re.search(r'The correct answer is \(([A-D])\)', response)
     if match:
@@ -92,7 +104,7 @@ def get_pred(data, args, fout):
             template = template_0shot_cot
         else:
             template = template_0shot
-        prompt = template.replace('$DOC$', context.strip()).replace('$Q$', item['question'].strip()).replace('$C_A$', item['choice_A'].strip()).replace('$C_B$', item['choice_B'].strip()).replace('$C_C$', item['choice_C'].strip()).replace('$C_D$', item['choice_D'].strip())[-512:]
+        prompt = template.replace('$DOC$', context.strip()).replace('$Q$', item['question'].strip()).replace('$C_A$', item['choice_A'].strip()).replace('$C_B$', item['choice_B'].strip()).replace('$C_C$', item['choice_C'].strip()).replace('$C_D$', item['choice_D'].strip())
         if args.cot:
             output = query_llm(prompt, model, tokenizer, client, temperature=0.1, max_new_tokens=1024)
         else:
