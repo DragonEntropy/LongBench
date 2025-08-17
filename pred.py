@@ -54,7 +54,6 @@ def query_llm(prompt, model, tokenizer, client=None, temperature=0.5, max_new_to
                 max_tokens=max_new_tokens,
                 stream=False
             )
-            print(completion.choices[0].text)
             return completion.choices[0].text
             # return completion.choices[0].message.content
         except KeyboardInterrupt as e:
@@ -92,6 +91,9 @@ def get_pred(data, args, fout):
         api_key=API_KEY
     )
     for item in tqdm(data):
+        if item["length"] != "short":
+            continue
+        
         context = item['context']
         if args.rag > 0:
             template = template_rag
@@ -118,11 +120,12 @@ def get_pred(data, args, fout):
             output = query_llm(prompt, model, tokenizer, client, temperature=0.1, max_new_tokens=128)
             if output == '':
                 continue
+        print(prompt)
         response = output.strip()
         item['response'] = response
         item['pred'] = extract_answer(response)
         item['judge'] = item['pred'] == item['answer']
-        item['context'] = context[:1000]
+        item['context'] = context
         fout.write(json.dumps(item, ensure_ascii=False) + '\n')
         fout.flush()
 

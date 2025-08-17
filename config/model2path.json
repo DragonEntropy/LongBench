@@ -10,5 +10,6 @@
     "Mistral-Large-Instruct-2411": "mistralai/Mistral-Large-Instruct-2411",
     "c4ai-command-r-plus-08-2024": "CohereForAI/c4ai-command-r-plus-08-2024",
     "glm-4-plus": "THUDM/glm-4-9b-chat",
-    "../../models/llama-2-7b-hf": "../../models/llama-2-7b-hf"
+    "../../models/llama-2-7b-hf": "../../models/llama-2-7b-hf",
+    "../../models/llama-2-custom": "../../models/llama-2-custom"
 }
