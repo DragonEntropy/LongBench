@@ -66,7 +66,6 @@ def query_llm(prompt, model, tokenizer, client=None, temperature=0.5, max_new_to
         return ''
 
 def extract_answer(response):
-    print(response)
     response = response.replace('*', '')
     match = re.search(r'The correct answer is \(([A-D])\)', response)
     if match:
@@ -120,7 +119,6 @@ def get_pred(data, args, fout):
             output = query_llm(prompt, model, tokenizer, client, temperature=0.1, max_new_tokens=128)
             if output == '':
                 continue
-        print(prompt)
         response = output.strip()
         item['response'] = response
         item['pred'] = extract_answer(response)
