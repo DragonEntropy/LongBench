@@ -16,5 +16,8 @@
     "o1-preview-2024-09-12": 120000,
     "claude-3.5-sonnet-20241022": 200000,
     "../../models/llama-2-7b-hf": 250000,
-    "../../models/llama-2-custom": 250000
+    "../../models/llama-2-custom": 250000,
+    "llama2-short": 68200,
+    "llama2-medium": 136400,
+    "llama2-long": 272800
 }
