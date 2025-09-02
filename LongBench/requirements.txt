@@ -1,4 +1,4 @@
-datasets
+datasets==2.19.1
 tqdm
 rouge
 jieba
