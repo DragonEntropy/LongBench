@@ -22,6 +22,7 @@ def parse_args(args=None):
     parser.add_argument('--model', type=str, default=None)
     parser.add_argument('--e', action='store_true', help="Evaluate on LongBench-E")
     parser.add_argument('-l', '--limit', type=int, default=-1, help="Maximum entries per dataset")
+    parser.add_argument('f', '--finetuned', type='store_true', help="""Set to true to append "_finetuned" to the end of model name""")
     return parser.parse_args(args)
 
 # This is the customized building prompt for chat models
@@ -160,6 +161,9 @@ if __name__ == '__main__':
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model_name = args.model
+    if args.finetuned:
+        model_name = f"{model_name}_finetuned"
+    
     # define your model
     max_length = model2maxlen[model_name]
     if args.e:
