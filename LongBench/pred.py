@@ -9,20 +9,22 @@ import random
 import argparse
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from openai import OpenAI
 
 URL = "http://127.0.0.1:8000/v1"
 API_KEY = "token-abc123"
 
-model2path = json.load(open("config/model2path.json", "r"))
-model2maxlen = json.load(open("config/model2maxlen.json", "r"))
+base_path = "src/LongBench/LongBench"
+model2path = json.load(open(f"{base_path}/config/model2path.json", "r"))
+model2maxlen = json.load(open(f"{base_path}/config/model2maxlen.json", "r"))
+dataset2prompt = json.load(open(f"{base_path}/config/dataset2prompt.json", "r"))
+dataset2maxlen = json.load(open(f"{base_path}/config/dataset2maxlen.json", "r"))
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default=None)
     parser.add_argument('--e', action='store_true', help="Evaluate on LongBench-E")
     parser.add_argument('-l', '--limit', type=int, default=-1, help="Maximum entries per dataset")
-    parser.add_argument('f', '--finetuned', type='store_true', help="""Set to true to append "_finetuned" to the end of model name""")
+    parser.add_argument('-f', '--finetuned', action='store_true', help="""Set to true to append "_finetuned" to the end of model name""")
     return parser.parse_args(args)
 
 # This is the customized building prompt for chat models
@@ -57,9 +59,9 @@ def post_process(response, model_name):
         response = response.split("<eoa>")[0]
     return response
 
-def get_pred(rank, world_size, data, max_length, max_gen, prompt_format, dataset, device, model_name, model2path, out_path, limit):
+def get_pred(rank, world_size, data, max_length, max_gen, prompt_format, dataset, device, model_name, model2path, out_path, args):
     device = torch.device(f'cuda:{rank}')
-    model, tokenizer = load_model_and_tokenizer(model2path[model_name], model_name, device)
+    model, tokenizer = load_model_and_tokenizer(model2path[args.model], model_name, device)
     count = 0
     for json_obj in tqdm(data):
         prompt = prompt_format.format(**json_obj)
@@ -112,9 +114,9 @@ def get_pred(rank, world_size, data, max_length, max_gen, prompt_format, dataset
             f.write('\n')
 
         count += 1
-        if count == limit:
+        if count == args.limit:
             break
-    print(f"Processed {count}/{limit} required entries.")
+    print(f"Processed {count}/{args.limit} required entries.")
     if dist.is_initialized():
         dist.destroy_process_group()
 
@@ -156,7 +158,7 @@ def load_model_and_tokenizer(path, model_name, device):
 if __name__ == '__main__':
     seed_everything(42)
     args = parse_args()
-    world_size = torch.cuda.device_count()
+    world_size = 1 # torch.cuda.device_count()
     mp.set_start_method('spawn', force=True)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -165,7 +167,7 @@ if __name__ == '__main__':
         model_name = f"{model_name}_finetuned"
     
     # define your model
-    max_length = model2maxlen[model_name]
+    max_length = model2maxlen[args.model]
     if args.e:
         datasets = ["qasper", "multifieldqa_en", "hotpotqa", "2wikimqa", "gov_report", "multi_news", \
             "trec", "triviaqa", "samsum", "passage_count", "passage_retrieval_en", "lcc", "repobench-p"]
@@ -174,13 +176,6 @@ if __name__ == '__main__':
                     "dureader", "gov_report", "qmsum", "multi_news", "vcsum", "trec", "triviaqa", "samsum", "lsht", \
                     "passage_count", "passage_retrieval_en", "passage_retrieval_zh", "lcc", "repobench-p"]
     # we design specific prompt format and max generation length for each task, feel free to modify them to optimize model output
-    dataset2prompt = json.load(open("config/dataset2prompt.json", "r"))
-    dataset2maxlen = json.load(open("config/dataset2maxlen.json", "r"))
-
-    client = OpenAI(
-        base_url=URL,
-        api_key=API_KEY
-    )
 
     # predict on each dataset
     if not os.path.exists("pred"):
@@ -208,7 +203,7 @@ if __name__ == '__main__':
         processes = []
         for rank in range(world_size):
             p = mp.Process(target=get_pred, args=(rank, world_size, data_subsets[rank], max_length, \
-                        max_gen, prompt_format, dataset, device, model_name, model2path, out_path, args.limit))
+                        max_gen, prompt_format, dataset, device, model_name, model2path, out_path, args))
             p.start()
             processes.append(p)
         for p in processes:
