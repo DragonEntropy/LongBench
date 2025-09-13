@@ -3,12 +3,15 @@ from datasets import load_dataset
 import torch
 import json
 from transformers import AutoTokenizer, LlamaTokenizer, LlamaForCausalLM, AutoModelForCausalLM
+from transformers.models.llama.modeling_llama import LlamaConfig
 from tqdm import tqdm
 import numpy as np
 import random
 import argparse
 import torch.distributed as dist
 import torch.multiprocessing as mp
+
+from alterations.FractionalRoPE import LlamaConfigFractionalRoPE, LlamaForCausalFractionalRoPE
 
 URL = "http://127.0.0.1:8000/v1"
 API_KEY = "token-abc123"
@@ -25,6 +28,7 @@ def parse_args(args=None):
     parser.add_argument('--e', action='store_true', help="Evaluate on LongBench-E")
     parser.add_argument('-l', '--limit', type=int, default=-1, help="Maximum entries per dataset")
     parser.add_argument('-f', '--finetuned', action='store_true', help="""Set to true to append "_finetuned" to the end of model name""")
+    parser.add_argument('-t', '--type', type=str, default=None)
     return parser.parse_args(args)
 
 # This is the customized building prompt for chat models
@@ -59,17 +63,19 @@ def post_process(response, model_name):
         response = response.split("<eoa>")[0]
     return response
 
-def get_pred(rank, world_size, data, max_length, max_gen, prompt_format, dataset, device, model_name, model2path, out_path, args):
+def get_pred(rank, world_size, data, max_length, max_gen, prompt_format, dataset, device, model_name, model2path, model_type, out_path, args):
     device = torch.device(f'cuda:{rank}')
-    model, tokenizer = load_model_and_tokenizer(model2path[args.model], model_name, device)
+    model, tokenizer = load_model_and_tokenizer(model2path[args.model], model_name, model_type, device)
     count = 0
     for json_obj in tqdm(data):
         prompt = prompt_format.format(**json_obj)
         length = json_obj["length"]
-        print(f"{dataset}: {length}")
+        print(f"{dataset}: {length}", flush=True)
 
+        """
         if length >= max_length - max_gen:
             continue
+        """
 
         # truncate to fit max_length (we suggest truncate in the middle, since the left and right side may contain crucial instructions)
         tokenized_prompt = tokenizer(prompt, truncation=False, return_tensors="pt").input_ids[0]
@@ -129,7 +135,7 @@ def seed_everything(seed):
     torch.backends.cudnn.deterministic = True
     torch.cuda.manual_seed_all(seed)
 
-def load_model_and_tokenizer(path, model_name, device):
+def load_model_and_tokenizer(path, model_name, model_type, device):
     if "chatglm" in model_name or "internlm" in model_name or "xgen" in model_name:
         tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
         model = AutoModelForCausalLM.from_pretrained(path, trust_remote_code=True, torch_dtype=torch.bfloat16).to(device)
@@ -138,8 +144,17 @@ def load_model_and_tokenizer(path, model_name, device):
             tokenizer = LlamaTokenizer.from_pretrained(path)
             model = LlamaForCausalLM.from_pretrained(path, torch_dtype=torch.bfloat16).to(device)
         else:
-            tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
-            model = AutoModelForCausalLM.from_pretrained(path, local_files_only=True).to(device)
+            if model_type == "fractional":
+                tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
+
+                base_config = LlamaConfig.from_pretrained(path)
+                config = LlamaConfigFractionalRoPE(**base_config.to_dict(), fractional=True)
+                model = LlamaForCausalFractionalRoPE.from_pretrained(path, config=config, local_files_only=True).to(device)
+                tokenizer.pad_token = tokenizer.eos_token
+            else:
+                tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
+                model = AutoModelForCausalLM.from_pretrained(path, local_files_only=True).to(device)
+                tokenizer.pad_token = tokenizer.eos_token
     elif "longchat" in model_name or "vicuna" in model_name:
         from fastchat.model import load_model
         model, _ = load_model(
@@ -165,11 +180,12 @@ if __name__ == '__main__':
     model_name = args.model
     if args.finetuned:
         model_name = f"{model_name}_finetuned"
+    model_type = args.type
     
     # define your model
     max_length = model2maxlen[args.model]
     if args.e:
-        datasets = ["qasper", "multifieldqa_en", "hotpotqa", "2wikimqa", "gov_report", "multi_news", \
+        datasets = ["multifieldqa_en", "hotpotqa", "2wikimqa", "gov_report", "multi_news", \
             "trec", "triviaqa", "samsum", "passage_count", "passage_retrieval_en", "lcc", "repobench-p"]
     else:
         datasets = ["narrativeqa", "qasper", "multifieldqa_en", "multifieldqa_zh", "hotpotqa", "2wikimqa", "musique", \
@@ -203,7 +219,7 @@ if __name__ == '__main__':
         processes = []
         for rank in range(world_size):
             p = mp.Process(target=get_pred, args=(rank, world_size, data_subsets[rank], max_length, \
-                        max_gen, prompt_format, dataset, device, model_name, model2path, out_path, args))
+                        max_gen, prompt_format, dataset, device, model_name, model2path, model_type, out_path, args))
             p.start()
             processes.append(p)
         for p in processes:
