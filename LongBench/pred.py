@@ -11,7 +11,7 @@ import argparse
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-from alterations.FractionalRoPE import LlamaConfigFractionalRoPE, LlamaForCausalFractionalRoPE
+from src.alterations.FractionalRoPE import LlamaFractionalRoPEConfig, LlamaFractionalRoPEForCausalLM
 
 URL = "http://127.0.0.1:8000/v1"
 API_KEY = "token-abc123"
@@ -24,7 +24,8 @@ dataset2maxlen = json.load(open(f"{base_path}/config/dataset2maxlen.json", "r"))
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, default=None)
+    parser.add_argument('-m', '--model', type=str, default=None)
+    parser.add_argument('-c', '--context_size', type=int, default=8192)
     parser.add_argument('--e', action='store_true', help="Evaluate on LongBench-E")
     parser.add_argument('-l', '--limit', type=int, default=-1, help="Maximum entries per dataset")
     parser.add_argument('-f', '--finetuned', action='store_true', help="""Set to true to append "_finetuned" to the end of model name""")
@@ -65,7 +66,11 @@ def post_process(response, model_name):
 
 def get_pred(rank, world_size, data, max_length, max_gen, prompt_format, dataset, device, model_name, model2path, model_type, out_path, args):
     device = torch.device(f'cuda:{rank}')
-    model, tokenizer = load_model_and_tokenizer(model2path[args.model], model_name, model_type, device)
+    if args.model in model2path.keys():
+        model_path = model2path[args.model]
+    else:
+        model_path = args.model
+    model, tokenizer = load_model_and_tokenizer(model_path, model_name, model_type, device)
     count = 0
     for json_obj in tqdm(data):
         prompt = prompt_format.format(**json_obj)
@@ -139,17 +144,21 @@ def load_model_and_tokenizer(path, model_name, model_type, device):
     if "chatglm" in model_name or "internlm" in model_name or "xgen" in model_name:
         tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
         model = AutoModelForCausalLM.from_pretrained(path, trust_remote_code=True, torch_dtype=torch.bfloat16).to(device)
-    elif "llama2" in model_name:
+    elif "llama2" in model_name or "llama-2" in model_name:
         if "chat" in model_name:
             tokenizer = LlamaTokenizer.from_pretrained(path)
             model = LlamaForCausalLM.from_pretrained(path, torch_dtype=torch.bfloat16).to(device)
         else:
             if model_type == "fractional":
+                print("Loading fractional model", flush=True)
+                print(f"path: {path}", flush=True)
                 tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
 
                 base_config = LlamaConfig.from_pretrained(path)
-                config = LlamaConfigFractionalRoPE(**base_config.to_dict(), fractional=True)
-                model = LlamaForCausalFractionalRoPE.from_pretrained(path, config=config, local_files_only=True).to(device)
+                config = LlamaFractionalRoPEConfig(**base_config.to_dict())
+                model = LlamaFractionalRoPEForCausalLM.from_pretrained(path, config=config, local_files_only=True).to(device)
+                
+                print(model.model.rotary_emb)
                 tokenizer.pad_token = tokenizer.eos_token
             else:
                 tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
@@ -183,7 +192,8 @@ if __name__ == '__main__':
     model_type = args.type
     
     # define your model
-    max_length = model2maxlen[args.model]
+    # max_length = model2maxlen[args.model]
+    max_length = args.context_size
     if args.e:
         datasets = ["multifieldqa_en", "hotpotqa", "2wikimqa", "gov_report", "multi_news", \
             "trec", "triviaqa", "samsum", "passage_count", "passage_retrieval_en", "lcc", "repobench-p"]
@@ -200,12 +210,12 @@ if __name__ == '__main__':
         os.makedirs("pred_e")
     for dataset in datasets:
         if args.e:
-            data = load_dataset('THUDM/LongBench', f"{dataset}_e", split='test', cache_dir = "../../../datasets")
+            data = load_dataset('THUDM/LongBench', f"{dataset}_e", split='test', cache_dir = "../../../datasets", trust_remote_code=True)
             if not os.path.exists(f"pred_e/{model_name}"):
                 os.makedirs(f"pred_e/{model_name}")
             out_path = f"pred_e/{model_name}/{dataset}.jsonl"
         else:
-            data = load_dataset('THUDM/LongBench', dataset, split='test', cache_dir = "../../../datasets")
+            data = load_dataset('THUDM/LongBench', dataset, split='test', cache_dir = "../../../datasets", trust_remote_code=True)
             if not os.path.exists(f"pred/{model_name}"):
                 os.makedirs(f"pred/{model_name}")
             out_path = f"pred/{model_name}/{dataset}.jsonl"
